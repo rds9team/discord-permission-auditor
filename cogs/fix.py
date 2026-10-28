@@ -33,9 +33,11 @@ class FixSelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("管理者権限がありません。", ephemeral=True)
+            return
         selected_index = int(self.values[0])
         finding = self.findings[selected_index]
-        print(f"🔧 修正選択: {finding.severity.name} - {finding.title}")
         modal = FixConfirmModal(finding, self.guild)
         await interaction.response.send_modal(modal)
 
@@ -68,34 +70,34 @@ class FixConfirmModal(discord.ui.Modal, title="修正確認"):
         return "\n".join(lines)
 
     async def on_submit(self, interaction: discord.Interaction):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("管理者権限がありません。", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True)
 
         try:
-            print(f"🔧 修正実行開始: {self.finding.check}")
             success = await self._execute_fix()
             if success:
-                print(f"✅ 修正成功: {self.finding.check}")
                 await interaction.followup.send(
-                    "✅ 修正が完了しました！",
+                    "修正が完了しました。",
                     ephemeral=True
                 )
                 view = ReauditView(self.guild)
                 await interaction.followup.send(
-                    "🔄 再監査を実行しますか？",
+                    "再監査を実行しますか？",
                     view=view,
                     ephemeral=True
                 )
             else:
-                print(f"❌ 修正失敗: {self.finding.check}")
                 await interaction.followup.send(
-                    "❌ 修正に失敗しました。\n"
-                    "権限が不足しているか、対象が既に変更されている可能性があります。",
+                    "修正に失敗しました。\n"
+                    "権限が不足しているか、対象が既に変更または削除されている可能性があります。",
                     ephemeral=True
                 )
         except Exception as e:
-            print(f"❌ 修正エラー: {e}")
             await interaction.followup.send(
-                f"❌ エラーが発生しました: {str(e)}",
+                f"エラーが発生しました: {str(e)}",
                 ephemeral=True
             )
 
@@ -129,10 +131,8 @@ class FixConfirmModal(discord.ui.Modal, title="修正確認"):
             check_id == "external_bot_usable" and external_bot_channel_target
         )
         if needs_roles and not me.guild_permissions.manage_roles:
-            print("❌ Botに manage_roles 権限がありません")
             return False
         if needs_channels and not me.guild_permissions.manage_channels:
-            print("❌ Botに manage_channels 権限がありません")
             return False
 
         if check_id == "everyone_excess":
@@ -154,7 +154,6 @@ class FixConfirmModal(discord.ui.Modal, title="修正確認"):
             return await fix_stale_invite(guild, self.finding)
         elif check_id == "integration_webhooks":
             return await fix_orphaned_webhook(guild, self.finding)
-        print(f"❌ 未対応のチェック: {check_id}")
         return False
 
 
@@ -163,16 +162,17 @@ class ReauditView(discord.ui.View):
         super().__init__(timeout=60)
         self.guild = guild
 
-    @discord.ui.button(label="🔄 再監査する", style=discord.ButtonStyle.primary)
+    @discord.ui.button(label="再監査する", style=discord.ButtonStyle.primary)
     async def reaudit_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if not interaction.user.guild_permissions.administrator:
+            await interaction.response.send_message("管理者権限がありません。", ephemeral=True)
+            return
+
         await interaction.response.defer(ephemeral=True)
-        print("🔄 再監査実行")
 
         cfg = config.load_config()
         findings, ran = await run_audit(self.guild, cfg)
         risks = calculate_risks(findings)
-
-        print(f"🔍 再監査結果: {len(findings)}件")
 
         from findings import build_summary_embed
         summary = build_summary_embed(self.guild.name, findings, ran, risks=risks)
@@ -184,13 +184,13 @@ class ReauditView(discord.ui.View):
         ])
         if fixable_count > 0:
             await interaction.followup.send(
-                f"🔧 **{fixable_count}件**の問題が自動修正可能です。\n"
+                f"**{fixable_count}件**の問題が自動修正可能です。\n"
                 "修正する場合は `/fix` コマンドを実行してください。",
                 ephemeral=True
             )
         else:
             await interaction.followup.send(
-                "✅ 自動修正可能な問題はありません。",
+                "自動修正可能な問題はありません。",
                 ephemeral=True
             )
 
@@ -216,20 +216,14 @@ class FixCog(commands.Cog):
         cfg = config.load_config()
         findings, _ = await run_audit(guild, cfg)
 
-        print(f"🔍 /fix: 全Finding {len(findings)}件")
-
         fixable = [
             f for f in findings
             if f.auto_fixable and f.severity not in (Severity.LOW, Severity.INFO)
         ]
 
-        print(f"🔧 修正可能: {len(fixable)}件")
-        for f in fixable:
-            print(f"  - {f.severity.name}: {f.title}")
-
         if not fixable:
             await interaction.followup.send(
-                "✅ 自動修正可能な問題はありません。",
+                "自動修正可能な問題はありません。",
                 ephemeral=True
             )
             return
@@ -239,7 +233,7 @@ class FixCog(commands.Cog):
         view.add_item(select)
 
         await interaction.followup.send(
-            f"🔧 **{len(fixable)}件**の問題が自動修正可能です。\n"
+            f"**{len(fixable)}件**の問題が自動修正可能です。\n"
             "修正する問題を選択してください。",
             view=view,
             ephemeral=True

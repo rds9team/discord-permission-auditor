@@ -52,10 +52,9 @@ class AuditCog(commands.Cog):
             f for f in findings
             if f.auto_fixable and f.severity not in (Severity.LOW, Severity.INFO)
         ])
-        print(f"🔧 修正可能な問題: {fixable_count}件")
         if fixable_count > 0:
             await interaction.followup.send(
-                f"🔧 **{fixable_count}件**の問題は自動修正可能です。\n"
+                f"**{fixable_count}件**の問題は自動修正可能です。\n"
                 "修正する場合は `/fix` コマンドを実行してください。",
                 ephemeral=True
             )

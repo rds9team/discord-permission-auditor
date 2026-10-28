@@ -196,6 +196,7 @@ async def check_role_inheritance(guild: discord.Guild, cfg, out: List[Finding]) 
                             title=f"冗長な権限 '{_perm_label(perm)}' がロール '{role.name}' にあります",
                             detail=f"ロール '{role.name}' は '{_perm_label(perm)}' を持っていますが、上位ロールも同じ権限を持っています。",
                             target=role.name,
+                            target_id=role.id,
                             recommendation="下位ロールからこの権限を削除してください。",
                             description="同じ権限が複数のロールに付与されていると、権限の管理が複雑になります。",
                             impact="権限の継承が複雑だと、意図しないメンバーに権限が渡る可能性があります。",
@@ -211,7 +212,8 @@ async def check_role_inheritance(guild: discord.Guild, cfg, out: List[Finding]) 
 
 
 async def check_everyone_visible(guild: discord.Guild, cfg, out: List[Finding]) -> None:
-    visible = []
+    visible_names = []
+    visible_ids = []
     for channel in guild.channels:
         if cfg.channel_ignored(channel):
             continue
@@ -220,15 +222,17 @@ async def check_everyone_visible(guild: discord.Guild, cfg, out: List[Finding]) 
         perms = channel.permissions_for(guild.default_role)
         if perms.read_messages or perms.view_channel:
             name = getattr(channel, "name", str(channel))
-            visible.append(f"#{name}")
-    if visible:
+            visible_names.append(f"#{name}")
+            visible_ids.append(channel.id)
+    if visible_names:
         out.append(
             Finding(
                 severity=Severity.INFO,
                 check="everyone_visible",
-                title=f"@everyone が {len(visible)} 個のチャンネルを読めます",
-                detail="読めるチャンネル: " + ", ".join(visible[:40]) + (" ..." if len(visible) > 40 else ""),
+                title=f"@everyone が {len(visible_names)} 個のチャンネルを読めます",
+                detail="読めるチャンネル: " + ", ".join(visible_names[:40]) + (" ..." if len(visible_names) > 40 else ""),
                 target="@everyone",
+                target_ids=visible_ids,
                 recommendation="機密チャンネルは @everyone からアクセスを制限してください。",
                 description="@everyone がチャンネルを読める場合、サーバーに参加している全員がその内容を見られます。",
                 impact="内部向けの情報が外部のユーザーに見える可能性があります。",
@@ -244,23 +248,39 @@ async def check_everyone_visible(guild: discord.Guild, cfg, out: List[Finding]) 
 
 
 async def check_mention_everyone(guild: discord.Guild, cfg, out: List[Finding]) -> None:
-    allowed = []
-    for member in guild.members:
-        if member.bot:
+    # メンション権限を与えている危険なロールを特定
+    culprit_roles = []
+    for role in guild.roles:
+        if cfg.role_ignored(role) or role.is_default() or role.managed:
             continue
-        if member.guild_permissions.administrator:
+        if role.permissions.mention_everyone and not role.permissions.administrator:
+            culprit_roles.append(role)
+
+    allowed_names = []
+    for member in guild.members:
+        if member.bot or member.guild_permissions.administrator:
             continue
         if member.guild_permissions.mention_everyone:
             name = getattr(member, "display_name", member.name)
-            allowed.append(name)
-    if allowed:
+            allowed_names.append(name)
+
+    if culprit_roles or allowed_names:
+        role_labels = [r.name for r in culprit_roles]
+        detail_msg = ""
+        if culprit_roles:
+            detail_msg += f"該当ロール: {', '.join(role_labels[:10])}\n"
+        if allowed_names:
+            detail_msg += f"メンション可能な一般メンバー ({len(allowed_names)}人): " + ", ".join(allowed_names[:30]) + (" ..." if len(allowed_names) > 30 else "")
+
         out.append(
             Finding(
                 severity=Severity.HIGH,
                 check="mention_everyone",
-                title=f"{len(allowed)} 人の一般メンバーが @everyone/@here をメンションできます",
-                detail="メンション可能なメンバー: " + ", ".join(allowed[:40]) + (" ..." if len(allowed) > 40 else ""),
-                recommendation="一般メンバーから「@everyone/@hereをメンション」権限を削除してください。",
+                title=f"{len(allowed_names)} 人の一般メンバーが @everyone/@here をメンションできます",
+                detail=detail_msg.strip(),
+                target=", ".join(role_labels[:3]) if role_labels else "ロール設定",
+                target_ids=[r.id for r in culprit_roles],
+                recommendation="一般メンバー向けロールから「@everyone/@hereをメンション」権限を削除してください。",
                 description="@everyone/@hereメンションはサーバー全体に通知を送る機能です。",
                 impact="悪用されると全メンバーに迷惑通知が届き、Raid時に混乱を招きます。",
                 fix_steps=[
@@ -269,7 +289,7 @@ async def check_mention_everyone(guild: discord.Guild, cfg, out: List[Finding]) 
                     "「@everyone/@hereをメンション」のチェックを外す",
                     "保存する"
                 ],
-                auto_fixable=True,
+                auto_fixable=bool(culprit_roles),
             )
         )
 
@@ -286,6 +306,7 @@ async def check_external_bot_usable(guild: discord.Guild, cfg, out: List[Finding
                 title=f"ロール '{role.name}' がユーザーインストールBotを使用できます",
                 detail=f"ロール '{role.name}' に「外部アプリを使用」権限があります。",
                 target=role.name,
+                target_id=role.id,
                 recommendation="一般メンバーのロールから「外部アプリを使用」を無効にしてください。",
                 description="ユーザーインストール型アプリがチャンネルに公開メッセージを投稿できます。",
                 impact="荒らし用アプリによるスパムや偽装メッセージのリスクが高まります。",
@@ -311,6 +332,7 @@ async def check_external_bot_usable(guild: discord.Guild, cfg, out: List[Finding
                     title=f"チャンネル #{getattr(channel, 'name', channel)} で外部アプリが許可されています",
                     detail="@everyone のチャンネル権限で「外部アプリを使用」が許可されています。",
                     target=f"#{getattr(channel, 'name', str(channel))}",
+                    target_id=channel.id,
                     recommendation="このチャンネルの @everyone から「外部アプリを使用」を削除してください。",
                     description="チャンネル単位の上書きにより、ユーザーインストール型アプリが公開投稿できます。",
                     impact="サーバー全体設定を無効にしていても、このチャンネルでは荒らし投稿が可能になります。",
@@ -404,6 +426,7 @@ async def check_integration_webhooks(guild: discord.Guild, cfg, out: List[Findin
                     title=f"作成者が退去したWebhookがあります (チャンネル: #{hook.channel.name})",
                     detail=f"Webhook '{hook.name}' の作成者がサーバーにいません。",
                     target=hook.name or "unknown",
+                    target_id=hook.id,
                     recommendation="不要なWebhookは削除してください。",
                     description="作成者がいないWebhookは管理されず、悪用されるリスクがあります。",
                     impact="攻撃者がこのWebhookを見つけて、偽装メッセージを送信する可能性があります。",
@@ -463,8 +486,20 @@ async def run_audit(guild: discord.Guild, cfg) -> tuple[List[Finding], int]:
                     auto_fixable=False,
                 )
             )
-        except Exception:
-            continue
+        except Exception as e:
+            out.append(
+                Finding(
+                    severity=Severity.INFO,
+                    check=check_id,
+                    title="チェック実行中にエラーが発生しました",
+                    detail=f"チェック '{check_id}' の実行中に予期せぬエラーが発生しました: {str(e)}",
+                    recommendation="Botのログを確認してください。",
+                    description="内部エラーのためこのチェックは完了しませんでした。",
+                    impact="監査結果が不完全になる可能性があります。",
+                    fix_steps=[],
+                    auto_fixable=False,
+                )
+            )
     return out, ran
 
 
@@ -512,10 +547,14 @@ async def fix_webhook_permission(guild: discord.Guild) -> bool:
 
 async def fix_redundant_permission(guild: discord.Guild, finding: Finding) -> bool:
     try:
-        role_name = finding.target
-        role = discord.utils.get(guild.roles, name=role_name)
+        role = None
+        if finding.target_id:
+            role = guild.get_role(finding.target_id)
+        if not role and finding.target:
+            role = discord.utils.get(guild.roles, name=finding.target)
         if not role:
             return False
+
         perm_name = None
         for perm in DANGEROUS_PERMS:
             if perm.lower() in finding.detail.lower():
@@ -523,6 +562,7 @@ async def fix_redundant_permission(guild: discord.Guild, finding: Finding) -> bo
                 break
         if not perm_name:
             return False
+
         perms = role.permissions
         setattr(perms, perm_name, False)
         await role.edit(permissions=perms)
@@ -533,42 +573,63 @@ async def fix_redundant_permission(guild: discord.Guild, finding: Finding) -> bo
 
 async def fix_channel_visibility(guild: discord.Guild, finding: Finding) -> bool:
     try:
-        channel_names = re.findall(r'#([a-zA-Z0-9\-_]+)', finding.detail)
-        if not channel_names:
+        channels_to_fix = []
+        if finding.target_ids:
+            for cid in finding.target_ids[:10]:
+                ch = guild.get_channel(cid)
+                if ch:
+                    channels_to_fix.append(ch)
+        if not channels_to_fix:
+            channel_names = re.findall(r'#([a-zA-Z0-9\-_]+)', finding.detail)
+            for name in channel_names[:10]:
+                ch = discord.utils.get(guild.channels, name=name)
+                if ch:
+                    channels_to_fix.append(ch)
+
+        if not channels_to_fix:
             return False
-        success = True
-        for name in channel_names[:5]:
-            channel = discord.utils.get(guild.channels, name=name)
-            if channel:
-                try:
-                    await channel.set_permissions(guild.default_role, view_channel=False)
-                except:
-                    success = False
-        return success
+
+        modified_count = 0
+        for channel in channels_to_fix:
+            try:
+                await channel.set_permissions(guild.default_role, view_channel=False)
+                modified_count += 1
+            except Exception:
+                pass
+        return modified_count > 0
     except Exception:
         return False
 
 
 async def fix_mention_permission(guild: discord.Guild, finding: Finding) -> bool:
     try:
-        detail_parts = finding.detail.split(": ")
-        if len(detail_parts) < 2:
+        roles_to_fix = []
+        if finding.target_ids:
+            for rid in finding.target_ids:
+                r = guild.get_role(rid)
+                if r and not r.managed:
+                    roles_to_fix.append(r)
+
+        # target_ids が無い場合は target ロール名から取得
+        if not roles_to_fix and finding.target and finding.target != "ロール設定":
+            for rname in finding.target.split(","):
+                r = discord.utils.get(guild.roles, name=rname.strip())
+                if r and not r.managed:
+                    roles_to_fix.append(r)
+
+        if not roles_to_fix:
             return False
-        member_names = re.findall(r'[a-zA-Z0-9_\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]+', detail_parts[-1])
-        if not member_names:
-            return False
-        success = True
-        for name in member_names[:5]:
-            member = discord.utils.get(guild.members, display_name=name)
-            if member and not member.guild_permissions.administrator:
-                try:
-                    role = member.top_role
-                    perms = role.permissions
-                    perms.mention_everyone = False
-                    await role.edit(permissions=perms)
-                except:
-                    success = False
-        return success
+
+        modified_count = 0
+        for role in roles_to_fix:
+            try:
+                perms = role.permissions
+                perms.mention_everyone = False
+                await role.edit(permissions=perms)
+                modified_count += 1
+            except Exception:
+                pass
+        return modified_count > 0
     except Exception:
         return False
 
@@ -576,17 +637,28 @@ async def fix_mention_permission(guild: discord.Guild, finding: Finding) -> bool
 async def fix_external_bot_usable(guild: discord.Guild, finding: Finding) -> bool:
     """Disable public use of user-installed apps for a role or @everyone channel overwrite."""
     try:
-        if finding.target and finding.target.startswith("#"):
-            channel_name = finding.target[1:]
-            channel = discord.utils.get(guild.channels, name=channel_name)
+        # チャンネル上書きの修正
+        if (finding.target and finding.target.startswith("#")) or (finding.target_id and guild.get_channel(finding.target_id)):
+            channel = None
+            if finding.target_id:
+                channel = guild.get_channel(finding.target_id)
+            if not channel and finding.target:
+                channel_name = finding.target.lstrip("#")
+                channel = discord.utils.get(guild.channels, name=channel_name)
             if not channel:
                 return False
             await channel.set_permissions(guild.default_role, use_external_apps=False)
             return True
 
-        role = discord.utils.get(guild.roles, name=finding.target)
+        # ロール権限の修正
+        role = None
+        if finding.target_id:
+            role = guild.get_role(finding.target_id)
+        if not role and finding.target:
+            role = discord.utils.get(guild.roles, name=finding.target)
         if not role or role.managed:
             return False
+
         perms = role.permissions
         if not hasattr(perms, "use_external_apps"):
             return False
@@ -618,6 +690,13 @@ async def fix_stale_invite(guild: discord.Guild, finding: Finding) -> bool:
 
 async def fix_orphaned_webhook(guild: discord.Guild, finding: Finding) -> bool:
     try:
+        hooks = await guild.webhooks()
+        if finding.target_id:
+            for hook in hooks:
+                if hook.id == finding.target_id:
+                    await hook.delete()
+                    return True
+
         webhook_name = finding.target
         if not webhook_name:
             match = re.search(r"Webhook '([^']+)'", finding.detail)
@@ -625,7 +704,6 @@ async def fix_orphaned_webhook(guild: discord.Guild, finding: Finding) -> bool:
                 webhook_name = match.group(1)
             else:
                 return False
-        hooks = await guild.webhooks()
         for hook in hooks:
             if hook.name == webhook_name:
                 await hook.delete()

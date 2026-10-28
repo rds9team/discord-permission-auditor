@@ -9,13 +9,13 @@ Designed for server admins who want clear, actionable reports — not just raw p
 
 ## Features
 
-- 🔍 **Comprehensive audit** – checks `@everyone`, bots, roles, channels, invites, webhooks, and more
-- 🛡️ **Risk scoring** – evaluates Raid, Nuke, and External Attack risks
-- 📋 **Clear explanations** – each finding includes what's wrong, why it matters, and how to fix it
-- 🔧 **One‑click fixes** – safely resolve many issues with a single button (admin only)
-- 📄 **Copy‑ready text report** – plain text summary for easy sharing or saving
-- ⚙️ **Configurable** – enable/disable checks, whitelist roles/channels/bots via JSON
-- 🚀 **Lightweight** – no database, no background tasks, no external APIs
+- **Comprehensive audit** – checks `@everyone`, bots, roles, channels, invites, webhooks, and more
+- **Risk scoring** – evaluates Raid, Nuke, and External Attack risks
+- **Clear explanations** – each finding includes what's wrong, why it matters, and how to fix it
+- **Interactive fixes** – safely resolve issues with selection and confirmation dialog (admin only)
+- **Copy‑ready text report** – plain text summary for easy sharing or saving
+- **Configurable** – enable/disable checks, whitelist roles/channels/bots via JSON
+- **Lightweight** – no database, no background tasks, no external APIs
 
 ---
 

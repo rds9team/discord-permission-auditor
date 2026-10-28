@@ -29,6 +29,8 @@ class Finding:
     title: str
     detail: str
     target: str = ""
+    target_id: Optional[int] = None
+    target_ids: List[int] = field(default_factory=list)
     recommendation: str = ""
     description: str = ""
     impact: str = ""
@@ -42,6 +44,8 @@ class Finding:
             "title": self.title,
             "detail": self.detail,
             "target": self.target,
+            "target_id": self.target_id,
+            "target_ids": self.target_ids,
             "recommendation": self.recommendation,
             "description": self.description,
             "impact": self.impact,
@@ -62,7 +66,7 @@ def build_summary_embed(guild_name: str, findings: List[Finding], scanned: int, 
     total = len(findings)
     if total == 0:
         color = 0x1E8449
-        desc = "✅ 問題は検出されませんでした。このサーバーは安全です。"
+        desc = "問題は検出されませんでした。現在の設定は安全です。"
     else:
         worst = max(findings, key=lambda f: f.severity.value).severity
         color = SEVERITY_COLOR[worst.name]
@@ -70,14 +74,14 @@ def build_summary_embed(guild_name: str, findings: List[Finding], scanned: int, 
         desc = f"**{total}件**の問題が見つかりました。\n" + " / ".join(parts)
 
     embed = discord.Embed(
-        title=f"🔒 権限監査レポート - {guild_name}",
+        title=f"権限監査レポート - {guild_name}",
         description=desc,
         color=color,
     )
 
     if risks:
         risk_text = (
-            f"🛡️ **総合リスク評価**\n"
+            f"**総合リスク評価**\n"
             f"・Raidリスク: {risks.get('raid', '不明')}\n"
             f"・Nukeリスク: {risks.get('nuke', '不明')}\n"
             f"・外部攻撃リスク: {risks.get('external', '不明')}"
@@ -93,7 +97,7 @@ def build_detail_embeds(findings: List[Finding], per_embed: int = 10) -> List[di
     chunk = sort_findings(findings)
     for i in range(0, len(chunk), per_embed):
         group = chunk[i: i + per_embed]
-        embed = discord.Embed(title="📋 詳細レポート", color=SEVERITY_COLOR["INFO"])
+        embed = discord.Embed(title="詳細レポート", color=SEVERITY_COLOR["INFO"])
         for f in group:
             name = f"**[{f.severity.name}] {f.title}**"
             if f.target:
@@ -107,7 +111,7 @@ def build_detail_embeds(findings: List[Finding], per_embed: int = 10) -> List[di
             if f.fix_steps:
                 body += "**修正手順**:\n" + "\n".join(f"  {i+1}. {step}" for i, step in enumerate(f.fix_steps[:3]))
             if f.auto_fixable:
-                body += "\n✅ 自動修正可能"
+                body += "\n[自動修正可能]"
 
             embed.add_field(name=name[:256], value=body[:1024], inline=False)
         if len(chunk) > per_embed:
@@ -137,7 +141,7 @@ def build_text_report(guild_name: str, findings: List[Finding], risks: dict = No
         ])
 
     if not findings:
-        lines.append("✅ 問題は検出されませんでした。")
+        lines.append("問題は検出されませんでした。")
         return "\n".join(lines)
 
     for severity in ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"]:
