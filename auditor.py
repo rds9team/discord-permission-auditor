@@ -64,6 +64,7 @@ async def check_everyone_excess(guild: discord.Guild, cfg, out: List[Finding]) -
                     title=f"@everyone が危険な権限 '{_perm_label(perm)}' を持っています",
                     detail=f"@everyone に '{_perm_label(perm)}' が付与されています。",
                     target="@everyone",
+                    perm_name=perm,
                     recommendation="この権限を @everyone から削除してください。",
                     description=f"@everyone は全メンバーに適用されるロールです。",
                     impact=f"悪意のあるメンバーが '{_perm_label(perm)}' を悪用すると、サーバーに深刻な被害が出る可能性があります。",
@@ -141,6 +142,7 @@ async def check_server_misconfig(guild: discord.Guild, cfg, out: List[Finding]) 
                 title="@everyone が招待を作成できます",
                 detail="@everyone に「招待作成」権限があります。",
                 target="@everyone",
+                perm_name="create_instant_invite",
                 recommendation="@everyone から「招待作成」権限を削除してください。",
                 description="誰でも招待リンクを作れると、サーバーに無制限に人が入ってくる可能性があります。",
                 impact="Raid時に大量の荒らしアカウントが参加する原因になります。",
@@ -161,6 +163,7 @@ async def check_server_misconfig(guild: discord.Guild, cfg, out: List[Finding]) 
                 title="@everyone がWebhookを管理できます",
                 detail="@everyone に「Webhookの管理」権限があります。",
                 target="@everyone",
+                perm_name="manage_webhooks",
                 recommendation="@everyone から「Webhookの管理」権限を削除してください。",
                 description="誰でもWebhookを作成・編集・削除できると、悪用された場合に大量のスパムメッセージを送信できます。",
                 impact="攻撃者がWebhookを悪用して、サーバーに偽装メッセージを送信できます。",
@@ -197,7 +200,8 @@ async def check_role_inheritance(guild: discord.Guild, cfg, out: List[Finding]) 
                             detail=f"ロール '{role.name}' は '{_perm_label(perm)}' を持っていますが、上位ロールも同じ権限を持っています。",
                             target=role.name,
                             target_id=role.id,
-                            recommendation="下位ロールからこの権限を削除してください。",
+                            perm_name=perm,
+                            recommendation="下位ロールからこの権限を削除してください。ただし、上位ロールとメンバー構成が異なる場合は設定を維持してください。",
                             description="同じ権限が複数のロールに付与されていると、権限の管理が複雑になります。",
                             impact="権限の継承が複雑だと、意図しないメンバーに権限が渡る可能性があります。",
                             fix_steps=[
@@ -206,7 +210,7 @@ async def check_role_inheritance(guild: discord.Guild, cfg, out: List[Finding]) 
                                 f"「{_perm_label(perm)}」のチェックを外す",
                                 "保存する"
                             ],
-                            auto_fixable=True,
+                            auto_fixable=False,
                         )
                     )
 
@@ -242,7 +246,7 @@ async def check_everyone_visible(guild: discord.Guild, cfg, out: List[Finding]) 
                     "@everyone の「チャンネルを見る」をOFFにする",
                     "保存する"
                 ],
-                auto_fixable=True,
+                auto_fixable=False,
             )
         )
 
@@ -508,12 +512,13 @@ async def run_audit(guild: discord.Guild, cfg) -> tuple[List[Finding], int]:
 async def fix_everyone_permissions(guild: discord.Guild, finding: Finding) -> bool:
     try:
         everyone = guild.default_role
-        perm_name = None
-        for perm in DANGEROUS_PERMS:
-            if perm.lower() in finding.detail.lower():
-                perm_name = perm
-                break
+        perm_name = finding.perm_name
         if not perm_name:
+            for perm in DANGEROUS_PERMS:
+                if perm.lower() in finding.detail.lower():
+                    perm_name = perm
+                    break
+        if not perm_name or not hasattr(everyone.permissions, perm_name):
             return False
         perms = everyone.permissions
         setattr(perms, perm_name, False)
@@ -555,12 +560,13 @@ async def fix_redundant_permission(guild: discord.Guild, finding: Finding) -> bo
         if not role:
             return False
 
-        perm_name = None
-        for perm in DANGEROUS_PERMS:
-            if perm.lower() in finding.detail.lower():
-                perm_name = perm
-                break
+        perm_name = finding.perm_name
         if not perm_name:
+            for perm in DANGEROUS_PERMS:
+                if perm.lower() in finding.detail.lower():
+                    perm_name = perm
+                    break
+        if not perm_name or not hasattr(role.permissions, perm_name):
             return False
 
         perms = role.permissions

@@ -31,6 +31,7 @@ class Finding:
     target: str = ""
     target_id: Optional[int] = None
     target_ids: List[int] = field(default_factory=list)
+    perm_name: Optional[str] = None
     recommendation: str = ""
     description: str = ""
     impact: str = ""
@@ -46,6 +47,7 @@ class Finding:
             "target": self.target,
             "target_id": self.target_id,
             "target_ids": self.target_ids,
+            "perm_name": self.perm_name,
             "recommendation": self.recommendation,
             "description": self.description,
             "impact": self.impact,
